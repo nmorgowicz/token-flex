@@ -1,0 +1,51 @@
+{
+  "name": "token-flex",
+  "version": "0.1.0",
+  "description": "Token and cost statistics for pi coding agent sessions, with multi-project aggregation.",
+  "author": "AIFib",
+  "license": "MIT",
+  "type": "module",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "pi-extension",
+    "token-flex",
+    "tokens",
+    "usage",
+    "cost",
+    "multi-project"
+  ],
+  "homepage": "https://gitlab.com/clankstank/pi-ext/token-stats#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://gitlab.com/clankstank/pi-ext/token-stats.git"
+  },
+  "bugs": {
+    "url": "https://gitlab.com/clankstank/pi-ext/token-stats/-/issues"
+  },
+  "files": [
+    "extensions",
+    "README.md",
+    "LICENSE",
+    ".env.example"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "smoke": "node tests/smoke.ts"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.87.1",
+    "@earendil-works/pi-tui": "^0.87.1",
+    "@types/node": "^22.19.19",
+    "typescript": "^5.9.3"
+  },
+  "pi": {
+    "extensions": [
+      "./extensions"
+    ]
+  }
+}
