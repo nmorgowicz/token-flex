@@ -20,8 +20,8 @@
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { DynamicBorder, getMarkdownTheme } from "@earendil-works/pi-coding-agent";
-import type { AutocompleteItem } from "@earendil-works/pi-tui";
-import { Container, Markdown, matchesKey, Text } from "@earendil-works/pi-tui";
+import type { AutocompleteItem, Component } from "@earendil-works/pi-tui";
+import { Container, Markdown, matchesKey, Text, visibleWidth } from "@earendil-works/pi-tui";
 import {
   closeSync,
   existsSync,
@@ -902,28 +902,146 @@ export function setupReport(cwd: string): SetupReport {
   return { markdown: lines.join("\n"), registryCreated, registeredCurrent, pruned };
 }
 
+/** Overlay chrome outside the scroll pane: top border, title, bottom border. */
+const OVERLAY_CHROME_ROWS = 3;
+/** Status row the pane renders below its viewport. */
+const PANE_STATUS_ROWS = 1;
+const SCROLLBAR_TRACK = "│";
+const SCROLLBAR_THUMB = "█";
+
+/**
+ * Fixed-height scroll viewport over a taller component.
+ *
+ * The report used to render as a plain container. pi's main-screen renderer hands
+ * overflowing rows to the terminal's scrollback, so any terminal height worked
+ * there; hosts that paint a terminal-height viewport (oh-my-pi) clip the overlay
+ * instead, which hides the top of the report with no way to reach it. The pane
+ * owns its window so both hosts stay readable: it renders exactly the rows it is
+ * given, scrolls with the arrow / page / home / end keys, and reports the visible
+ * range in its status row.
+ */
+export class ScrollPane implements Component {
+  readonly #content: Component;
+  readonly #rows: () => number;
+  readonly #dim: (text: string) => string;
+  #offset = 0;
+  #total = 0;
+  #viewport = 0;
+
+  constructor(content: Component, rows: () => number, dim: (text: string) => string = (text) => text) {
+    this.#content = content;
+    this.#rows = rows;
+    this.#dim = dim;
+  }
+
+  /** First visible content row, zero-based. */
+  get offset(): number {
+    return this.#offset;
+  }
+
+  /** Content rows the pane can show at once. */
+  get viewport(): number {
+    return this.#viewport;
+  }
+
+  /** Total content rows, as of the last render. */
+  get total(): number {
+    return this.#total;
+  }
+
+  render(width: number): string[] {
+    const safeWidth = Math.max(2, width);
+    const bodyHeight = Math.max(1, this.#rows() - PANE_STATUS_ROWS);
+    // Reserve the scrollbar column unconditionally: the content renders once per
+    // frame, so the row count stays stable, and the gutter disappears into the
+    // frame's right padding when nothing overflows.
+    const lines = this.#content.render(safeWidth - 1);
+    this.#total = lines.length;
+    this.#viewport = bodyHeight;
+    this.#offset = Math.max(0, Math.min(this.#offset, Math.max(0, this.#total - bodyHeight)));
+    const bar = this.#scrollbar(bodyHeight);
+    const body = lines
+      .slice(this.#offset, this.#offset + bodyHeight)
+      .map((line, index) => `${line}${" ".repeat(Math.max(0, safeWidth - 1 - visibleWidth(line)))}${bar[index]}`);
+    while (body.length < bodyHeight) body.push(" ".repeat(safeWidth));
+    body.push(this.#dim(this.#statusLine()));
+    return body;
+  }
+
+  /** Consume a scroll key. Returns true when the pane handled it. */
+  scrollKey(data: string): boolean {
+    const max = Math.max(0, this.#total - this.#viewport);
+    let target: number | undefined;
+    if (matchesKey(data, "up")) target = this.#offset - 1;
+    else if (matchesKey(data, "down")) target = this.#offset + 1;
+    else if (matchesKey(data, "pageUp")) target = this.#offset - this.#viewport;
+    else if (matchesKey(data, "pageDown")) target = this.#offset + this.#viewport;
+    else if (matchesKey(data, "home")) target = 0;
+    else if (matchesKey(data, "end")) target = max;
+    if (target === undefined) return false;
+    this.#offset = Math.max(0, Math.min(target, max));
+    return true;
+  }
+
+  invalidate(): void {
+    this.#content.invalidate();
+  }
+
+  #scrollbar(height: number): string[] {
+    const track = new Array<string>(height).fill(" ");
+    if (this.#total <= height) return track;
+    const maxOffset = this.#total - height;
+    const thumb = Math.max(1, Math.round((height * height) / this.#total));
+    const start = Math.round((this.#offset * (height - thumb)) / maxOffset);
+    for (let index = 0; index < height; index++) {
+      track[index] = index >= start && index < start + thumb ? SCROLLBAR_THUMB : this.#dim(SCROLLBAR_TRACK);
+    }
+    return track;
+  }
+
+  #statusLine(): string {
+    if (this.#total <= this.#viewport) return "Press Enter or Esc to close";
+    const first = this.#offset + 1;
+    const last = Math.min(this.#total, this.#offset + this.#viewport);
+    return `rows ${formatNumber(first)}-${formatNumber(last)} of ${formatNumber(this.#total)} · ↑/↓ line · PgUp/PgDn page · Home/End · Enter/Esc close`;
+  }
+}
+
 const showMarkdown = async (markdown: string, ctx: ExtensionCommandContext): Promise<void> => {
   if (ctx.mode !== "tui") {
     console.log(markdown);
     return;
   }
-  await ctx.ui.custom((_tui, theme, _kb, done) => {
-    const container = new Container();
-    const border = new DynamicBorder((s: string) => theme.fg("accent", s));
-    const mdTheme = getMarkdownTheme();
-    container.addChild(border);
-    container.addChild(new Text(theme.fg("accent", theme.bold("Pi Token Stats")), 1, 0));
-    container.addChild(new Markdown(markdown, 1, 1, mdTheme));
-    container.addChild(new Text(theme.fg("dim", "Press Enter or Esc to close"), 1, 0));
-    container.addChild(border);
-    return {
-      render: (width: number) => container.render(width),
-      invalidate: () => container.invalidate(),
-      handleInput: (data: string) => {
-        if (matchesKey(data, "enter") || matchesKey(data, "escape")) done(undefined);
-      },
-    };
-  });
+  await ctx.ui.custom(
+    (tui, theme, _kb, done) => {
+      const container = new Container();
+      const border = new DynamicBorder((s: string) => theme.fg("accent", s));
+      const mdTheme = getMarkdownTheme();
+      // Read the terminal height per render: a resize re-windows the report in place.
+      const paneRows = (): number => {
+        const height = tui.terminal.rows;
+        return Number.isFinite(height) ? Math.max(PANE_STATUS_ROWS + 1, height - OVERLAY_CHROME_ROWS) : 20;
+      };
+      const pane = new ScrollPane(new Markdown(markdown, 1, 1, mdTheme), paneRows, (text) => theme.fg("dim", text));
+      container.addChild(border);
+      container.addChild(new Text(theme.fg("accent", theme.bold("Pi Token Stats")), 1, 0));
+      container.addChild(pane);
+      container.addChild(border);
+      return {
+        render: (width: number) => container.render(width),
+        invalidate: () => container.invalidate(),
+        handleInput: (data: string) => {
+          if (pane.scrollKey(data)) return;
+          if (matchesKey(data, "enter") || matchesKey(data, "escape")) done(undefined);
+        },
+      };
+    },
+    {
+      overlay: true,
+      // Full-screen modal: the pane owns the window, so the host must not clip it.
+      overlayOptions: { anchor: "top-center", width: "100%", maxHeight: "100%", margin: 0 },
+    },
+  );
 };
 
 const HELP_TEXT = `# token-flex — Help

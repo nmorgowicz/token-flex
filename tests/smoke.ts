@@ -3,8 +3,8 @@
  *
  * Builds synthetic pi sessions in a temporary directory, then exercises the
  * public surface end to end: argument parsing, range resolution, aggregation,
- * registry maintenance, filesystem discovery and the setup report. Prints the
- * generated report and exits non-zero when any check fails.
+ * registry maintenance, filesystem discovery, the setup report and the scrollable
+ * report pane. Prints the generated report and exits non-zero when any check fails.
  */
 
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -26,6 +26,7 @@ import {
   registryPath,
   resolveRange,
   saveRegistry,
+  ScrollPane,
   setupReport,
   sumProjects,
 } from "../extensions/token-flex.ts";
@@ -177,6 +178,40 @@ check("report overview section", report.includes("## Overview"));
 check("report model section", report.includes("## By Model"));
 check("report project section", report.includes("## By Project") && report.includes("`acme-web`") && report.includes("`acme-api`"));
 check("report reasoning column", report.includes("Reasoning"));
+
+// --- scrollable report overlay ----------------------------------------------
+// The report used to render as a plain container. Hosts that clip an overlay to
+// the terminal height (oh-my-pi) then showed only its bottom rows, with no way to
+// scroll, so the pane must fill exactly the rows it is given and reach both ends.
+const reportLines = report.split("\n");
+const pane = new ScrollPane(
+  { render: (width: number): string[] => reportLines.map((line) => line.padEnd(width, " ")), invalidate: (): void => {} },
+  () => 10,
+  (text) => text,
+);
+const head = pane.render(80);
+check("scroll pane fills its viewport", head.length === 10, `rows=${head.length}`);
+check("scroll pane opens on the report head", head[0].includes("Pi Token Usage"), `first=${head[0].trim()}`);
+check("scroll pane windows the whole report", pane.total === reportLines.length && pane.viewport === 9, `total=${pane.total} viewport=${pane.viewport}`);
+check("scroll pane ignores non-scroll keys", pane.scrollKey("\r") === false && pane.scrollKey("q") === false);
+check("scroll pane pages by one viewport", pane.scrollKey("\x1b[6~") === true && pane.offset === 9, `offset=${pane.offset}`);
+check("scroll pane pages back", pane.scrollKey("\x1b[5~") === true && pane.offset === 0, `offset=${pane.offset}`);
+pane.scrollKey("\x1b[F");
+const tail = pane.render(80);
+check(
+  "scroll pane reaches the last content row",
+  pane.offset === reportLines.length - 9 && tail[8].startsWith(reportLines[reportLines.length - 1] ?? "!"),
+  `offset=${pane.offset} last=${tail[8].trim()}`,
+);
+check(
+  "scroll pane reports its window",
+  tail[9].trim().startsWith(`rows ${reportLines.length - 8}-${reportLines.length} of ${reportLines.length} `),
+  `status=${tail[9].trim()}`,
+);
+check(
+  "scroll pane returns to the head",
+  pane.scrollKey("\x1b[H") === true && pane.offset === 0 && pane.render(80)[0].includes("Pi Token Usage"),
+);
 
 // --- discovery --------------------------------------------------------------
 const fromProjectsRoot = discoverFromProjectsRoot(projectsRoot);

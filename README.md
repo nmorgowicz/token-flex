@@ -80,6 +80,21 @@ Default: last 30 days.
 | `-h, --help` | Argument help overlay |
 | `--setup` | Configuration report and registry initialization |
 
+### Report overlay
+
+The report opens as a full-screen overlay. When it is taller than the terminal it scrolls,
+instead of being clipped:
+
+| Key | Action |
+| --- | --- |
+| `↑` / `↓` | Scroll one line |
+| `PgUp` / `PgDn` | Scroll one viewport |
+| `Home` / `End` | Jump to the first or last row |
+| `Enter` / `Esc` | Close |
+
+The status row reports the visible range (`rows 17-32 of 40`), and the right edge carries a
+scrollbar while the report overflows. The window follows a terminal resize.
+
 ## How it works
 
 ```mermaid
@@ -182,6 +197,7 @@ The comparison below is against upstream `pi-token-stats@0.1.1`.
 | Discovery fallback | none | `PI_PROJECTS_ROOT` plus the standard pi sessions layout |
 | Setup / diagnostics | none | `--setup` report and registry initialization |
 | Completions | 3 fixed presets | presets plus registered project names |
+| Report overlay | fixed container, clipped on short terminals | scrollable pane with arrow/page/home/end keys, position row, and scrollbar |
 | Testability | one default export | exported pure functions plus `npm run smoke` |
 | Environment | agent and session dir overrides | plus `PI_PROJECT_REGISTRY`, `PI_PROJECT_NAME`, `PI_PROJECTS_ROOT` |
 
@@ -254,8 +270,8 @@ npm run smoke      # functional smoke test on synthetic sessions; prints both re
 ```
 
 `npm run smoke` builds temporary sessions, exercises parsing, range resolution,
-aggregation, discovery, the registry and the setup report, and exits non-zero when a
-check fails (37 checks at the time of writing).
+aggregation, discovery, the registry, the setup report and the report pane's scrolling,
+and exits non-zero when a check fails (46 checks at the time of writing).
 
 ## Credits
 
